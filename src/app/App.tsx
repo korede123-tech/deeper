@@ -626,57 +626,57 @@ const fetchLegacyInstagramAnalytics = async (
 const fetchPublicInstagramAnalytics = async (
   parsedUrl: ParsedInstagramUrl,
 ): Promise<FetchedInstagramAnalytics | null> => {
-  const endpoint = import.meta.env.PROD
-    ? '/api/instagram-analytics'
-    : '/instagram-apify-proxy';
+  const mapApifyInstagramRecord = (
+    item: Record<string, unknown>,
+  ): FetchedInstagramAnalytics => {
+    const combined = normalizeResponseText(JSON.stringify(item));
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 65_000);
+    const views = firstNumberMatch(combined, [
+      /"videoViewCount"\s*:\s*(\d+)/i,
+      /"videoPlayCount"\s*:\s*(\d+)/i,
+      /"viewCount"\s*:\s*(\d+)/i,
+      /"playCount"\s*:\s*(\d+)/i,
+      /"video_view_count"\s*:\s*(\d+)/i,
+      /"video_play_count"\s*:\s*(\d+)/i,
+    ]);
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        directUrls: [parsedUrl.canonicalUrl],
-        resultsType: 'details',
-        resultsLimit: 1,
-      }),
-    });
+    const likes = firstNumberMatch(combined, [
+      /"likesCount"\s*:\s*(\d+)/i,
+      /"likes"\s*:\s*(\d+)/i,
+      /"like_count"\s*:\s*(\d+)/i,
+    ]);
 
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
+    const comments = firstNumberMatch(combined, [
+      /"commentsCount"\s*:\s*(\d+)/i,
+      /"comments"\s*:\s*(\d+)/i,
+      /"comment_count"\s*:\s*(\d+)/i,
+    ]);
 
-    if (!response.ok || !Array.isArray(payload) || payload.length === 0) {
-      return await fetchLegacyInstagramAnalytics(parsedUrl);
-    }
+    const shares = firstNumberMatch(combined, [
+      /"sharesCount"\s*:\s*(\d+)/i,
+      /"shareCount"\s*:\s*(\d+)/i,
+      /"share_count"\s*:\s*(\d+)/i,
+    ]);
 
-    const firstRecord = payload[0];
-    if (typeof firstRecord !== 'object' || firstRecord === null) {
-      return await fetchLegacyInstagramAnalytics(parsedUrl);
-    }
-
-    const item = firstRecord as Record<string, unknown>;
+    const reach = firstNumberMatch(combined, [
+      /"reachCount"\s*:\s*(\d+)/i,
+      /"reach_count"\s*:\s*(\d+)/i,
+    ]);
 
     const caption = typeof item.caption === 'string' ? item.caption.trim() : '';
-    const ownerUsername = typeof item.ownerUsername === 'string' ? item.ownerUsername.trim() : '';
+    const ownerUsername = typeof item.ownerUsername === 'string'
+      ? item.ownerUsername.trim()
+      : '';
     const postLabelSource = caption || (ownerUsername ? `@${ownerUsername}` : `Post ${parsedUrl.shortcode}`);
     const postLabel = postLabelSource.length > 28
       ? `${postLabelSource.slice(0, 28)}...`
       : postLabelSource;
 
-    const views = parseCompactNumber(String(item.videoViewCount ?? ''));
-    const likes = parseCompactNumber(String(item.likesCount ?? ''));
-    const comments = parseCompactNumber(String(item.commentsCount ?? ''));
-    const createdAt = parseDateFromUnknown(item.timestamp);
+    const createdAt =
+      parseDateFromUnknown(item.timestamp) ??
+      parseDateFromUnknown(item.takenAtTimestamp) ??
+      parseDateFromUnknown(item.datePublished) ??
+      firstDateMatch(combined);
 
     return {
       platform: 'instagram',
@@ -686,18 +686,92 @@ const fetchPublicInstagramAnalytics = async (
       supportsDateRange: false,
       metrics: {
         views,
-        reach: null,
+        reach,
         likes,
         comments,
-        shares: null,
+        shares,
         reposts: null,
       },
     };
-  } catch {
-    return await fetchLegacyInstagramAnalytics(parsedUrl);
-  } finally {
-    clearTimeout(timeoutId);
+  };
+
+  const fetchFromApify = async (
+    resultsType: 'details' | 'posts',
+  ): Promise<FetchedInstagramAnalytics | null> => {
+    const endpoint = import.meta.env.PROD
+      ? '/api/instagram-analytics'
+      : '/instagram-apify-proxy';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 65_000);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          directUrls: [parsedUrl.canonicalUrl],
+          resultsType,
+          resultsLimit: 1,
+        }),
+      });
+
+      let payload: unknown = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !Array.isArray(payload) || payload.length === 0) {
+        return null;
+      }
+
+      const candidate = payload.find((record) => {
+        if (typeof record !== 'object' || record === null) {
+          return false;
+        }
+
+        return !('error' in (record as Record<string, unknown>));
+      });
+
+      if (!candidate || typeof candidate !== 'object') {
+        return null;
+      }
+
+      return mapApifyInstagramRecord(candidate as Record<string, unknown>);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const detailsResult = await fetchFromApify('details');
+  const detailsMetricCount = detailsResult
+    ? countAvailableMetrics(detailsResult.metrics)
+    : 0;
+
+  const shouldTryPostsFallback = !detailsResult || detailsMetricCount < 2;
+  if (!shouldTryPostsFallback) {
+    return detailsResult;
   }
+
+  const postsResult = await fetchFromApify('posts');
+
+  if (!detailsResult) {
+    return postsResult;
+  }
+
+  if (!postsResult) {
+    return detailsResult;
+  }
+
+  return pickMoreCompleteResult(detailsResult, postsResult);
 };
 
 const fetchPublicTikTokAnalytics = async (
@@ -997,7 +1071,11 @@ export default function App() {
     }
 
     setStatus('loading');
-    setStatusMessage('Fetching analytics data...');
+    setStatusMessage(
+      parsedInstagramUrl
+        ? 'Fetching Instagram metrics from Apify...'
+        : 'Fetching TikTok metrics from Apify...',
+    );
     setAnalytics(null);
     setPostCreationDate(null);
     setStartDate('');
@@ -1033,7 +1111,7 @@ export default function App() {
         fetchErrorMessage ||
           (parsedTikTokUrl
             ? 'Public TikTok metrics are unavailable for this video.'
-            : 'Public metrics are unavailable for this post.'),
+            : 'Instagram API returned no public metrics for this link (likes/views may be hidden or restricted).'),
       );
       setAnalytics(null);
       setPostCreationDate(null);
@@ -1041,7 +1119,7 @@ export default function App() {
       return;
     }
 
-    const platformPrefix = fetched.platform === 'tiktok' ? 'TikTok' : 'Public';
+    const platformPrefix = fetched.platform === 'tiktok' ? 'TikTok' : 'Instagram API';
     setStatus('success');
     setStatusMessage(
       availablePublicMetricLabels.length < 5
