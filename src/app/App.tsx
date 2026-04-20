@@ -142,6 +142,8 @@ const firstDateMatch = (text: string): string | null => {
   const timestampPatterns = [
     /"taken_at_timestamp"\s*:\s*(\d{9,13})/i,
     /"taken_at"\s*:\s*(\d{9,13})/i,
+    /\btaken_at_timestamp\b\s*:\s*(\d{9,13})/i,
+    /\btaken_at\b\s*:\s*(\d{9,13})/i,
   ];
 
   for (const pattern of timestampPatterns) {
@@ -428,6 +430,11 @@ const fetchPublicInstagramAnalytics = async (
       /"view_count"\s*:\s*(\d+)/i,
       /"play_count"\s*:\s*(\d+)/i,
       /"video_play_count"\s*:\s*(\d+)/i,
+      /\bvideo_view_count\b\s*:\s*(\d+)/i,
+      /\bview_count\b\s*:\s*(\d+)/i,
+      /\bplay_count\b\s*:\s*(\d+)/i,
+      /\bvideo_play_count\b\s*:\s*(\d+)/i,
+      /([\d,.]+\s*[KMB]?)\s+video\s+views/i,
       /([\d,.]+\s*[KMB]?)\s+views/i,
       /([\d,.]+\s*[KMB]?)\s+plays/i,
     ]);
@@ -436,7 +443,11 @@ const fetchPublicInstagramAnalytics = async (
       /"edge_media_preview_like"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
       /"edge_liked_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
       /"like_count"\s*:\s*(\d+)/i,
+      /\bedge_media_preview_like\b\s*:\s*\{\s*\bcount\b\s*:\s*(\d+)/i,
+      /\bedge_liked_by\b\s*:\s*\{\s*\bcount\b\s*:\s*(\d+)/i,
+      /\blike_count\b\s*:\s*(\d+)/i,
       /LikeAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
+      /LikeAction[\s\S]{0,240}?\buserInteractionCount\b\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
       /([\d,.]+\s*[KMB]?)\s+likes/i,
     ]);
 
@@ -444,7 +455,11 @@ const fetchPublicInstagramAnalytics = async (
       /"edge_media_to_parent_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
       /"edge_media_to_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
       /"comment_count"\s*:\s*(\d+)/i,
+      /\bedge_media_to_parent_comment\b\s*:\s*\{\s*\bcount\b\s*:\s*(\d+)/i,
+      /\bedge_media_to_comment\b\s*:\s*\{\s*\bcount\b\s*:\s*(\d+)/i,
+      /\bcomment_count\b\s*:\s*(\d+)/i,
       /CommentAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
+      /CommentAction[\s\S]{0,240}?\buserInteractionCount\b\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
       /View all\s+([\d,.]+\s*[KMB]?)\s+comments/i,
       /([\d,.]+\s*[KMB]?)\s+comments/i,
     ]);
@@ -452,11 +467,15 @@ const fetchPublicInstagramAnalytics = async (
     const shares = firstNumberMatch(combined, [
       /"share_count"\s*:\s*(\d+)/i,
       /"reshare_count"\s*:\s*(\d+)/i,
+      /\bshare_count\b\s*:\s*(\d+)/i,
+      /\breshare_count\b\s*:\s*(\d+)/i,
+      /ShareAction[\s\S]{0,240}?\buserInteractionCount\b\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
       /([\d,.]+\s*[KMB]?)\s+shares/i,
     ]);
 
     const reach = firstNumberMatch(combined, [
       /"reach_count"\s*:\s*(\d+)/i,
+      /\breach_count\b\s*:\s*(\d+)/i,
     ]);
 
     const createdAt = firstDateMatch(combined);
