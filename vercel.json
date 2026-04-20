@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/instagram-proxy/:path*",
+      "destination": "https://www.instagram.com/:path*"
+    },
+    {
+      "source": "/jina-proxy/:path*",
+      "destination": "https://r.jina.ai/:path*"
+    },
+    {
+      "source": "/noembed-proxy/:path*",
+      "destination": "https://noembed.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
