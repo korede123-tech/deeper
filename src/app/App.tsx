@@ -96,6 +96,48 @@ const firstNumberMatch = (text: string, patterns: RegExp[]): number | null => {
   return null;
 };
 
+const countAvailableMetrics = (metrics: FetchedInstagramAnalytics['metrics']): number =>
+  Object.values(metrics).reduce(
+    (total, metricValue) => (metricValue === null ? total : total + 1),
+    0,
+  );
+
+const pickMoreCompleteResult = (
+  primary: FetchedInstagramAnalytics,
+  fallback: FetchedInstagramAnalytics,
+): FetchedInstagramAnalytics => {
+  const primaryCount = countAvailableMetrics(primary.metrics);
+  const fallbackCount = countAvailableMetrics(fallback.metrics);
+
+  if (fallbackCount > primaryCount) {
+    return fallback;
+  }
+
+  if (fallbackCount < primaryCount) {
+    return primary;
+  }
+
+  if (!primary.createdAt && fallback.createdAt) {
+    return fallback;
+  }
+
+  if (primary.createdAt && !fallback.createdAt) {
+    return primary;
+  }
+
+  const primarySignal =
+    (primary.metrics.views ?? 0) +
+    (primary.metrics.likes ?? 0) +
+    (primary.metrics.comments ?? 0);
+
+  const fallbackSignal =
+    (fallback.metrics.views ?? 0) +
+    (fallback.metrics.likes ?? 0) +
+    (fallback.metrics.comments ?? 0);
+
+  return fallbackSignal > primarySignal ? fallback : primary;
+};
+
 const firstDateMatch = (text: string): string | null => {
   const timestampPatterns = [
     /"taken_at_timestamp"\s*:\s*(\d{9,13})/i,
@@ -294,140 +336,185 @@ const fetchJsonSource = async (url: string): Promise<Record<string, unknown> | n
 const fetchPublicInstagramAnalytics = async (
   parsedUrl: ParsedInstagramUrl,
 ): Promise<FetchedInstagramAnalytics | null> => {
-  const localEmbedPath = buildProxyUrl(
-    'instagram',
-    `/${parsedUrl.mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
-  );
-  const localPostPath = buildProxyUrl('instagram', `/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`);
+  const fetchForMediaType = async (
+    mediaType: ParsedInstagramUrl['mediaType'],
+  ): Promise<FetchedInstagramAnalytics | null> => {
+    const canonicalUrl = `https://www.instagram.com/${mediaType}/${parsedUrl.shortcode}/`;
 
-  const jinaProxyPostPath = buildProxyUrl(
-    'jina',
-    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`,
-  );
-  const jinaProxyJsonHintPath = buildProxyUrl(
-    'jina',
-    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/?__a=1&__d=dis`,
-  );
-  const jinaProxyEmbedPath = buildProxyUrl(
-    'jina',
-    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
-  );
+    const localEmbedPath = buildProxyUrl(
+      'instagram',
+      `/${mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
+    );
+    const localPostPath = buildProxyUrl('instagram', `/${mediaType}/${parsedUrl.shortcode}/`);
 
-  const jinaDirectBase = `https://r.jina.ai/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`;
-  const noEmbedUrl = buildProxyUrl(
-    'noembed',
-    `/embed?url=${encodeURIComponent(parsedUrl.canonicalUrl)}`,
-  );
+    const jinaProxyPostPath = buildProxyUrl(
+      'jina',
+      `/http://www.instagram.com/${mediaType}/${parsedUrl.shortcode}/`,
+    );
+    const jinaProxyJsonHintPath = buildProxyUrl(
+      'jina',
+      `/http://www.instagram.com/${mediaType}/${parsedUrl.shortcode}/?__a=1&__d=dis`,
+    );
+    const jinaProxyEmbedPath = buildProxyUrl(
+      'jina',
+      `/http://www.instagram.com/${mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
+    );
 
-  const [
-    localEmbed,
-    localPost,
-    jinaProxyPost,
-    jinaProxyJsonHint,
-    jinaProxyEmbed,
-    jinaDirectPost,
-    jinaDirectJsonHint,
-    jinaDirectEmbed,
-    noEmbed,
-  ] = await Promise.all([
-    fetchTextSource(localEmbedPath),
-    fetchTextSource(localPostPath),
-    fetchTextSource(jinaProxyPostPath),
-    fetchTextSource(jinaProxyJsonHintPath),
-    fetchTextSource(jinaProxyEmbedPath),
-    fetchTextSource(jinaDirectBase),
-    fetchTextSource(`${jinaDirectBase}?__a=1&__d=dis`),
-    fetchTextSource(`${jinaDirectBase}embed/captioned/`),
-    fetchJsonSource(noEmbedUrl),
-  ]);
+    const jinaDirectBase = `https://r.jina.ai/http://www.instagram.com/${mediaType}/${parsedUrl.shortcode}/`;
+    const noEmbedUrl = buildProxyUrl(
+      'noembed',
+      `/embed?url=${encodeURIComponent(canonicalUrl)}`,
+    );
 
-  const collectedSources: string[] = [];
-  if (localEmbed) {
-    collectedSources.push(localEmbed);
-  }
-  if (localPost) {
-    collectedSources.push(localPost);
-  }
-  if (jinaProxyPost) {
-    collectedSources.push(jinaProxyPost);
-  }
-  if (jinaProxyJsonHint) {
-    collectedSources.push(jinaProxyJsonHint);
-  }
-  if (jinaProxyEmbed) {
-    collectedSources.push(jinaProxyEmbed);
-  }
-  if (jinaDirectPost) {
-    collectedSources.push(jinaDirectPost);
-  }
-  if (jinaDirectJsonHint) {
-    collectedSources.push(jinaDirectJsonHint);
-  }
-  if (jinaDirectEmbed) {
-    collectedSources.push(jinaDirectEmbed);
-  }
-  if (noEmbed) {
-    collectedSources.push(JSON.stringify(noEmbed));
-  }
+    const [
+      localEmbed,
+      localPost,
+      jinaProxyPost,
+      jinaProxyJsonHint,
+      jinaProxyEmbed,
+      jinaDirectPost,
+      jinaDirectJsonHint,
+      jinaDirectEmbed,
+      noEmbed,
+    ] = await Promise.all([
+      fetchTextSource(localEmbedPath),
+      fetchTextSource(localPostPath),
+      fetchTextSource(jinaProxyPostPath),
+      fetchTextSource(jinaProxyJsonHintPath),
+      fetchTextSource(jinaProxyEmbedPath),
+      fetchTextSource(jinaDirectBase),
+      fetchTextSource(`${jinaDirectBase}?__a=1&__d=dis`),
+      fetchTextSource(`${jinaDirectBase}embed/captioned/`),
+      fetchJsonSource(noEmbedUrl),
+    ]);
 
-  if (collectedSources.length === 0) {
-    return null;
-  }
+    const collectedSources: string[] = [];
+    if (localEmbed) {
+      collectedSources.push(localEmbed);
+    }
+    if (localPost) {
+      collectedSources.push(localPost);
+    }
+    if (jinaProxyPost) {
+      collectedSources.push(jinaProxyPost);
+    }
+    if (jinaProxyJsonHint) {
+      collectedSources.push(jinaProxyJsonHint);
+    }
+    if (jinaProxyEmbed) {
+      collectedSources.push(jinaProxyEmbed);
+    }
+    if (jinaDirectPost) {
+      collectedSources.push(jinaDirectPost);
+    }
+    if (jinaDirectJsonHint) {
+      collectedSources.push(jinaDirectJsonHint);
+    }
+    if (jinaDirectEmbed) {
+      collectedSources.push(jinaDirectEmbed);
+    }
+    if (noEmbed) {
+      collectedSources.push(JSON.stringify(noEmbed));
+    }
 
-  const combined = normalizeResponseText(collectedSources.join('\n'));
+    if (collectedSources.length === 0) {
+      return null;
+    }
 
-  const views = firstNumberMatch(combined, [
-    /"video_view_count"\s*:\s*(\d+)/i,
-    /"view_count"\s*:\s*(\d+)/i,
-    /"play_count"\s*:\s*(\d+)/i,
-    /"video_play_count"\s*:\s*(\d+)/i,
-    /([\d,.]+\s*[KMB]?)\s+views/i,
-  ]);
+    const combined = normalizeResponseText(collectedSources.join('\n'));
 
-  const likes = firstNumberMatch(combined, [
-    /"edge_media_preview_like"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
-    /"edge_liked_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
-    /"like_count"\s*:\s*(\d+)/i,
-    /([\d,.]+\s*[KMB]?)\s+like/i,
-    /LikeAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
-    /([\d,.]+\s*[KMB]?)\s+likes/i,
-  ]);
+    const views = firstNumberMatch(combined, [
+      /"video_view_count"\s*:\s*(\d+)/i,
+      /"view_count"\s*:\s*(\d+)/i,
+      /"play_count"\s*:\s*(\d+)/i,
+      /"video_play_count"\s*:\s*(\d+)/i,
+      /([\d,.]+\s*[KMB]?)\s+views/i,
+      /([\d,.]+\s*[KMB]?)\s+plays/i,
+    ]);
 
-  const comments = firstNumberMatch(combined, [
-    /"edge_media_to_parent_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
-    /"edge_media_to_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
-    /"comment_count"\s*:\s*(\d+)/i,
-    /CommentAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
-    /([\d,.]+\s*[KMB]?)\s+comments/i,
-  ]);
+    const likes = firstNumberMatch(combined, [
+      /"edge_media_preview_like"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
+      /"edge_liked_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
+      /"like_count"\s*:\s*(\d+)/i,
+      /LikeAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
+      /([\d,.]+\s*[KMB]?)\s+likes/i,
+    ]);
 
-  const shares = firstNumberMatch(combined, [
-    /"share_count"\s*:\s*(\d+)/i,
-    /"reshare_count"\s*:\s*(\d+)/i,
-    /([\d,.]+\s*[KMB]?)\s+shares/i,
-  ]);
+    const comments = firstNumberMatch(combined, [
+      /"edge_media_to_parent_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
+      /"edge_media_to_comment"\s*:\s*\{\s*"count"\s*:\s*(\d+)/i,
+      /"comment_count"\s*:\s*(\d+)/i,
+      /CommentAction[\s\S]{0,200}?"userInteractionCount"\s*:\s*"?([\d,.]+\s*[KMB]?)"?/i,
+      /View all\s+([\d,.]+\s*[KMB]?)\s+comments/i,
+      /([\d,.]+\s*[KMB]?)\s+comments/i,
+    ]);
 
-  const reach = firstNumberMatch(combined, [
-    /"reach_count"\s*:\s*(\d+)/i,
-  ]);
+    const shares = firstNumberMatch(combined, [
+      /"share_count"\s*:\s*(\d+)/i,
+      /"reshare_count"\s*:\s*(\d+)/i,
+      /([\d,.]+\s*[KMB]?)\s+shares/i,
+    ]);
 
-  const createdAt = firstDateMatch(combined);
-  const postLabel = firstPostLabelMatch(combined, parsedUrl.shortcode);
+    const reach = firstNumberMatch(combined, [
+      /"reach_count"\s*:\s*(\d+)/i,
+    ]);
 
-  return {
-    shortcode: parsedUrl.shortcode,
-    postLabel,
-    createdAt,
-    supportsDateRange: false,
-    metrics: {
-      views,
-      reach,
-      likes,
-      comments,
-      shares,
-      reposts: null,
-    },
+    const createdAt = firstDateMatch(combined);
+    const postLabel = firstPostLabelMatch(combined, parsedUrl.shortcode);
+
+    return {
+      shortcode: parsedUrl.shortcode,
+      postLabel,
+      createdAt,
+      supportsDateRange: false,
+      metrics: {
+        views,
+        reach,
+        likes,
+        comments,
+        shares,
+        reposts: null,
+      },
+    };
   };
+
+  const primaryResult = await fetchForMediaType(parsedUrl.mediaType);
+
+  const primaryMetricCount = primaryResult
+    ? countAvailableMetrics(primaryResult.metrics)
+    : 0;
+
+  const shouldTryFallback =
+    !primaryResult ||
+    primaryMetricCount < 2 ||
+    primaryResult.createdAt === null;
+
+  if (!shouldTryFallback) {
+    return primaryResult;
+  }
+
+  const fallbackMediaType: ParsedInstagramUrl['mediaType'] =
+    parsedUrl.mediaType === 'reel'
+      ? 'p'
+      : parsedUrl.mediaType === 'p'
+      ? 'reel'
+      : 'p';
+
+  if (fallbackMediaType === parsedUrl.mediaType) {
+    return primaryResult;
+  }
+
+  const fallbackResult = await fetchForMediaType(fallbackMediaType);
+
+  if (!primaryResult) {
+    return fallbackResult;
+  }
+
+  if (!fallbackResult) {
+    return primaryResult;
+  }
+
+  return pickMoreCompleteResult(primaryResult, fallbackResult);
 };
 
 const formatDate = (dateStr: string): string => {
