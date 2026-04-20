@@ -16,8 +16,8 @@ cp .env.example .env.local
 
 ## TikTok analytics setup
 
-- TikTok fetch uses Apify actor `datapilot~tiktok-analytics-engagement-extractor`.
-- If Apify returns `actor-is-not-rented`, rent/activate the actor in your Apify account first.
+- TikTok fetch defaults to Apify actor `clockworks~tiktok-scraper`.
+- You can switch actors by setting `APIFY_TIKTOK_ACTOR_ID`.
 - For Vercel deployment, set these environment variables in your Vercel project:
   - `APIFY_TOKEN`
-  - `APIFY_TIKTOK_ACTOR_ID` (optional, defaults to `datapilot~tiktok-analytics-engagement-extractor`)
+  - `APIFY_TIKTOK_ACTOR_ID` (optional, defaults to `clockworks~tiktok-scraper`)

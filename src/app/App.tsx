@@ -642,7 +642,8 @@ const fetchPublicTikTokAnalytics = async (
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        urls: parsedUrl.canonicalUrl,
+        url: parsedUrl.canonicalUrl,
+        postURLs: [parsedUrl.canonicalUrl],
         useApifyProxy: true,
         apifyProxyGroups: ['RESIDENTIAL'],
       }),
@@ -682,6 +683,13 @@ const fetchPublicTikTokAnalytics = async (
         return {
           analytics: null,
           errorMessage: 'Apify authentication failed. Check APIFY_TOKEN and actor access.',
+        };
+      }
+
+      if (errorText.includes('posturls') || errorText.includes('input must contain')) {
+        return {
+          analytics: null,
+          errorMessage: 'TikTok actor input mismatch. Set APIFY_TIKTOK_ACTOR_ID to a supported actor.',
         };
       }
 
@@ -741,6 +749,12 @@ const fetchPublicTikTokAnalytics = async (
       /"shareCount"\s*:\s*(\d+)/i,
     ]);
 
+    const reposts = firstNumberMatch(combined, [
+      /"repostCount"\s*:\s*(\d+)/i,
+      /"repost_count"\s*:\s*(\d+)/i,
+      /"reposts"\s*:\s*(\d+)/i,
+    ]);
+
     const reach = firstNumberMatch(combined, [
       /"reach"\s*:\s*(\d+)/i,
       /"reach_count"\s*:\s*(\d+)/i,
@@ -749,11 +763,25 @@ const fetchPublicTikTokAnalytics = async (
     const description = typeof item.description === 'string'
       ? item.description.trim()
       : '';
+    const text = typeof item.text === 'string'
+      ? item.text.trim()
+      : '';
     const uploader = typeof item.uploader === 'string'
       ? item.uploader.trim()
       : '';
+    const authorMeta = typeof item.authorMeta === 'object' && item.authorMeta !== null
+      ? item.authorMeta as Record<string, unknown>
+      : null;
+    const authorHandle = authorMeta && typeof authorMeta.name === 'string'
+      ? authorMeta.name.trim()
+      : '';
 
-    const postLabelSource = description || (uploader ? `@${uploader}` : `TikTok ${parsedUrl.videoId}`);
+    const postLabelSource =
+      description ||
+      text ||
+      (uploader ? `@${uploader}` : '') ||
+      (authorHandle ? `@${authorHandle}` : '') ||
+      `TikTok ${parsedUrl.videoId}`;
     const postLabel = postLabelSource.length > 28
       ? `${postLabelSource.slice(0, 28)}...`
       : postLabelSource;
@@ -780,7 +808,7 @@ const fetchPublicTikTokAnalytics = async (
           likes,
           comments,
           shares,
-          reposts: null,
+          reposts,
         },
       },
       errorMessage: null,

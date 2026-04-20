@@ -1,4 +1,6 @@
-const DEFAULT_ACTOR_ID = 'datapilot~tiktok-analytics-engagement-extractor';
+const DEFAULT_ACTOR_ID = 'clockworks~tiktok-scraper';
+const CLOCKWORKS_ACTOR_ID = 'clockworks~tiktok-scraper';
+const CLOCKWORKS_ACTOR_RUN_ID = 'GdWCkxBtKWOsKjdch';
 
 const getBodyObject = (body) => {
   if (!body) {
@@ -35,7 +37,7 @@ const isValidTikTokUrl = (value) => {
 
 const sanitizeUrls = (rawUrls) => {
   if (typeof rawUrls !== 'string') {
-    return null;
+    return [];
   }
 
   const cleaned = rawUrls
@@ -44,11 +46,18 @@ const sanitizeUrls = (rawUrls) => {
     .filter(Boolean)
     .filter((line) => isValidTikTokUrl(line));
 
-  if (cleaned.length === 0) {
-    return null;
+  return cleaned;
+};
+
+const isClockworksTikTokActor = (actorId) => {
+  if (typeof actorId !== 'string') {
+    return false;
   }
 
-  return cleaned.join('\n');
+  const normalized = actorId.trim().toLowerCase();
+  return normalized === CLOCKWORKS_ACTOR_ID ||
+    actorId === CLOCKWORKS_ACTOR_RUN_ID ||
+    normalized.endsWith('~tiktok-scraper');
 };
 
 export default async function handler(request, response) {
@@ -76,8 +85,18 @@ export default async function handler(request, response) {
     ? body.urls
     : urlFromBody;
 
-  const urls = sanitizeUrls(rawUrls);
-  if (!urls) {
+  const postUrlsFromBody = Array.isArray(body.postURLs)
+    ? body.postURLs
+      .filter((value) => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => isValidTikTokUrl(value))
+    : [];
+
+  const urls = postUrlsFromBody.length > 0
+    ? postUrlsFromBody
+    : sanitizeUrls(rawUrls);
+
+  if (urls.length === 0) {
     response.status(400).json({
       error: {
         type: 'validation-error',
@@ -94,11 +113,15 @@ export default async function handler(request, response) {
     ? body.apifyProxyGroups
     : ['RESIDENTIAL'];
 
-  const upstreamBody = {
-    urls,
-    useApifyProxy,
-    apifyProxyGroups,
-  };
+  const upstreamBody = isClockworksTikTokActor(actorId)
+    ? {
+        postURLs: urls,
+      }
+    : {
+        urls: urls.join('\n'),
+        useApifyProxy,
+        apifyProxyGroups,
+      };
 
   const upstreamUrl = `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
 

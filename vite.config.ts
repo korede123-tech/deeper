@@ -19,7 +19,7 @@ function figmaAssetResolver() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apifyToken = env.APIFY_TOKEN || env.VITE_APIFY_TOKEN || ''
-  const apifyActorId = env.APIFY_TIKTOK_ACTOR_ID || 'datapilot~tiktok-analytics-engagement-extractor'
+  const apifyActorId = env.APIFY_TIKTOK_ACTOR_ID || 'clockworks~tiktok-scraper'
   const tiktokProxyPath = `/v2/acts/${apifyActorId}/run-sync-get-dataset-items`
 
   return {
