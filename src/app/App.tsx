@@ -2,14 +2,23 @@ import { useMemo, useState } from 'react';
 
 type DashboardStatus = 'idle' | 'loading' | 'success' | 'unavailable';
 type NumericMetric = number | null;
+type SupportedPlatform = 'instagram' | 'tiktok';
 
 interface ParsedInstagramUrl {
+  platform: 'instagram';
   mediaType: 'p' | 'reel' | 'tv';
   shortcode: string;
   canonicalUrl: string;
 }
 
+interface ParsedTikTokUrl {
+  platform: 'tiktok';
+  videoId: string;
+  canonicalUrl: string;
+}
+
 interface FetchedInstagramAnalytics {
+  platform: SupportedPlatform;
   shortcode: string;
   postLabel: string;
   createdAt: string | null;
@@ -22,6 +31,11 @@ interface FetchedInstagramAnalytics {
     shares: NumericMetric;
     reposts: NumericMetric;
   };
+}
+
+interface TikTokFetchResult {
+  analytics: FetchedInstagramAnalytics | null;
+  errorMessage: string | null;
 }
 
 type ProxySource = 'instagram' | 'jina' | 'noembed';
@@ -248,10 +262,82 @@ const parseInstagramUrl = (value: string): ParsedInstagramUrl | null => {
   }
 
   return {
+    platform: 'instagram',
     mediaType,
     shortcode,
     canonicalUrl: `https://www.instagram.com/${mediaType}/${shortcode}/`,
   };
+};
+
+const parseTikTokUrl = (value: string): ParsedTikTokUrl | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  const host = url.hostname.toLowerCase();
+  const isTikTokHost =
+    host === 'tiktok.com' ||
+    host === 'www.tiktok.com' ||
+    host === 'm.tiktok.com' ||
+    host === 'vm.tiktok.com' ||
+    host === 'vt.tiktok.com';
+
+  if (!isTikTokHost) {
+    return null;
+  }
+
+  const pathParts = url.pathname.split('/').filter(Boolean);
+  if (pathParts.length === 0) {
+    return null;
+  }
+
+  const idMatch = url.pathname.match(/\/video\/(\d+)/i);
+  const fallbackId = pathParts[pathParts.length - 1] || 'video';
+  const videoId = idMatch?.[1] ?? fallbackId;
+
+  if (!/^[A-Za-z0-9_-]+$/.test(videoId)) {
+    return null;
+  }
+
+  return {
+    platform: 'tiktok',
+    videoId,
+    canonicalUrl: `https://${url.hostname}${url.pathname}${url.search}`,
+  };
+};
+
+const parseDateFromUnknown = (value: unknown): string | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const milliseconds = value > 9_999_999_999 ? value : value * 1000;
+    const parsed = new Date(milliseconds);
+    return Number.isNaN(parsed.getTime()) ? null : toIsoDate(parsed);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d{9,13}$/.test(trimmed)) {
+    return parseDateFromUnknown(Number(trimmed));
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : toIsoDate(parsed);
 };
 
 const fetchWithTimeout = async (url: string, timeoutMs = 12_000): Promise<Response | null> => {
@@ -482,6 +568,7 @@ const fetchPublicInstagramAnalytics = async (
     const postLabel = firstPostLabelMatch(combined, parsedUrl.shortcode);
 
     return {
+      platform: 'instagram',
       shortcode: parsedUrl.shortcode,
       postLabel,
       createdAt,
@@ -534,6 +621,178 @@ const fetchPublicInstagramAnalytics = async (
   }
 
   return pickMoreCompleteResult(primaryResult, fallbackResult);
+};
+
+const fetchPublicTikTokAnalytics = async (
+  parsedUrl: ParsedTikTokUrl,
+): Promise<TikTokFetchResult> => {
+  const endpoint = import.meta.env.PROD
+    ? '/api/tiktok-analytics'
+    : '/tiktok-apify-proxy';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 65_000);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        urls: parsedUrl.canonicalUrl,
+        useApifyProxy: true,
+        apifyProxyGroups: ['RESIDENTIAL'],
+      }),
+    });
+
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const errorText = (() => {
+        if (typeof payload !== 'object' || payload === null) {
+          return '';
+        }
+
+        const errorRecord = payload as Record<string, unknown>;
+        const rawError = errorRecord.error;
+        if (typeof rawError !== 'object' || rawError === null) {
+          return '';
+        }
+
+        const message = (rawError as Record<string, unknown>).message;
+        return typeof message === 'string' ? message : '';
+      })().toLowerCase();
+
+      if (errorText.includes('rent') || errorText.includes('free trial')) {
+        return {
+          analytics: null,
+          errorMessage: 'TikTok actor is not rented on Apify yet. Rent it in Apify console, then retry.',
+        };
+      }
+
+      if (errorText.includes('token') || response.status === 401 || response.status === 403) {
+        return {
+          analytics: null,
+          errorMessage: 'Apify authentication failed. Check APIFY_TOKEN and actor access.',
+        };
+      }
+
+      return {
+        analytics: null,
+        errorMessage: 'TikTok analytics are unavailable for this video.',
+      };
+    }
+
+    if (!Array.isArray(payload) || payload.length === 0) {
+      return {
+        analytics: null,
+        errorMessage: 'No TikTok analytics were returned for this video.',
+      };
+    }
+
+    const record = payload.find(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        ((item as Record<string, unknown>).status === 'success' ||
+          (item as Record<string, unknown>).status === undefined),
+    ) ?? payload[0];
+
+    if (typeof record !== 'object' || record === null) {
+      return {
+        analytics: null,
+        errorMessage: 'TikTok analytics response format is invalid.',
+      };
+    }
+
+    const item = record as Record<string, unknown>;
+    const combined = normalizeResponseText(JSON.stringify(item));
+
+    const views = firstNumberMatch(combined, [
+      /"views"\s*:\s*(\d+)/i,
+      /"view_count"\s*:\s*(\d+)/i,
+      /"play_count"\s*:\s*(\d+)/i,
+      /"playCount"\s*:\s*(\d+)/i,
+    ]);
+
+    const likes = firstNumberMatch(combined, [
+      /"likes"\s*:\s*(\d+)/i,
+      /"like_count"\s*:\s*(\d+)/i,
+      /"diggCount"\s*:\s*(\d+)/i,
+    ]);
+
+    const comments = firstNumberMatch(combined, [
+      /"comments"\s*:\s*(\d+)/i,
+      /"comment_count"\s*:\s*(\d+)/i,
+      /"commentCount"\s*:\s*(\d+)/i,
+    ]);
+
+    const shares = firstNumberMatch(combined, [
+      /"shares"\s*:\s*(\d+)/i,
+      /"share_count"\s*:\s*(\d+)/i,
+      /"shareCount"\s*:\s*(\d+)/i,
+    ]);
+
+    const reach = firstNumberMatch(combined, [
+      /"reach"\s*:\s*(\d+)/i,
+      /"reach_count"\s*:\s*(\d+)/i,
+    ]);
+
+    const description = typeof item.description === 'string'
+      ? item.description.trim()
+      : '';
+    const uploader = typeof item.uploader === 'string'
+      ? item.uploader.trim()
+      : '';
+
+    const postLabelSource = description || (uploader ? `@${uploader}` : `TikTok ${parsedUrl.videoId}`);
+    const postLabel = postLabelSource.length > 28
+      ? `${postLabelSource.slice(0, 28)}...`
+      : postLabelSource;
+
+    const createdAt =
+      parseDateFromUnknown(item.created_at) ??
+      parseDateFromUnknown(item.create_time) ??
+      parseDateFromUnknown(item.createTime) ??
+      parseDateFromUnknown(item.published_at) ??
+      parseDateFromUnknown(item.publish_time) ??
+      parseDateFromUnknown(item.uploadDate) ??
+      null;
+
+    return {
+      analytics: {
+        platform: 'tiktok',
+        shortcode: parsedUrl.videoId,
+        postLabel,
+        createdAt,
+        supportsDateRange: false,
+        metrics: {
+          views,
+          reach,
+          likes,
+          comments,
+          shares,
+          reposts: null,
+        },
+      },
+      errorMessage: null,
+    };
+  } catch {
+    return {
+      analytics: null,
+      errorMessage: 'TikTok analytics request failed. Try again in a moment.',
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const formatDate = (dateStr: string): string => {
@@ -618,10 +877,12 @@ export default function App() {
   };
 
   const handleFetchAnalytics = async () => {
-    const parsedUrl = parseInstagramUrl(postUrl);
-    if (!parsedUrl) {
+    const parsedInstagramUrl = parseInstagramUrl(postUrl);
+    const parsedTikTokUrl = parsedInstagramUrl ? null : parseTikTokUrl(postUrl);
+
+    if (!parsedInstagramUrl && !parsedTikTokUrl) {
       setStatus('unavailable');
-      setStatusMessage('Enter a valid public Instagram post or reel URL.');
+      setStatusMessage('Enter a valid public Instagram or TikTok video URL.');
       setAnalytics(null);
       setPostCreationDate(null);
       setStartDate('');
@@ -631,14 +892,24 @@ export default function App() {
     }
 
     setStatus('loading');
-    setStatusMessage('Fetching public post data...');
+    setStatusMessage('Fetching analytics data...');
     setAnalytics(null);
     setPostCreationDate(null);
     setStartDate('');
     setEndDate('');
     setDateRangeDataAvailable(true);
 
-    const fetched = await fetchPublicInstagramAnalytics(parsedUrl);
+    let fetched: FetchedInstagramAnalytics | null = null;
+    let fetchErrorMessage: string | null = null;
+
+    if (parsedInstagramUrl) {
+      fetched = await fetchPublicInstagramAnalytics(parsedInstagramUrl);
+    } else if (parsedTikTokUrl) {
+      const tikTokResult = await fetchPublicTikTokAnalytics(parsedTikTokUrl);
+      fetched = tikTokResult.analytics;
+      fetchErrorMessage = tikTokResult.errorMessage;
+    }
+
     const availablePublicMetricLabels = fetched
       ? [
           fetched.metrics.views !== null ? 'views' : null,
@@ -653,18 +924,24 @@ export default function App() {
 
     if (!fetched || !hasAnyMetric) {
       setStatus('unavailable');
-      setStatusMessage('Public metrics are unavailable for this post.');
+      setStatusMessage(
+        fetchErrorMessage ||
+          (parsedTikTokUrl
+            ? 'Public TikTok metrics are unavailable for this video.'
+            : 'Public metrics are unavailable for this post.'),
+      );
       setAnalytics(null);
       setPostCreationDate(null);
       setDateRangeDataAvailable(false);
       return;
     }
 
+    const platformPrefix = fetched.platform === 'tiktok' ? 'TikTok' : 'Public';
     setStatus('success');
     setStatusMessage(
       availablePublicMetricLabels.length < 5
-        ? `Public metrics loaded (partial): ${availablePublicMetricLabels.join(', ')}.`
-        : 'Public metrics loaded.',
+        ? `${platformPrefix} metrics loaded (partial): ${availablePublicMetricLabels.join(', ')}.`
+        : `${platformPrefix} metrics loaded.`,
     );
     setAnalytics(fetched);
     setPostCreationDate(fetched.createdAt);
@@ -766,7 +1043,7 @@ export default function App() {
     }
 
     if (status === 'loading') {
-      return 'Fetching public post data...';
+      return 'Fetching analytics data...';
     }
 
     if (status === 'success') {
@@ -794,7 +1071,7 @@ export default function App() {
                 type="text"
                 value={postUrl}
                 onChange={(e) => setPostUrl(e.target.value)}
-                placeholder="https://instagram.com/p/..."
+                placeholder="https://instagram.com/p/... or https://www.tiktok.com/@user/video/..."
                 className="flex-1 bg-transparent border border-[#FFFFFF] px-4 py-3 text-sm placeholder:text-[#FFFFFF]/30 focus:outline-none"
               />
               <button

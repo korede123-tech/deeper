@@ -3,6 +3,9 @@
   "functions": {
     "api/proxy.js": {
       "maxDuration": 10
+    },
+    "api/tiktok-analytics.js": {
+      "maxDuration": 60
     }
   }
 }
