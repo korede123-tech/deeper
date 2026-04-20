@@ -457,8 +457,9 @@ export default function App() {
 
   const isLoading = status === 'loading';
   const isSuccess = status === 'success';
-  const showUnavailableForRange = isSuccess && !dateRangeDataAvailable;
-  const showDataValues = isSuccess && dateRangeDataAvailable;
+  const hasDateRangeContext = Boolean(postCreationDate);
+  const showUnavailableForRange = isSuccess && hasDateRangeContext && !dateRangeDataAvailable;
+  const showDataValues = isSuccess && (!hasDateRangeContext || dateRangeDataAvailable);
 
   const engagement = useMemo(() => {
     if (!analytics) {
