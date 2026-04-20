@@ -4,6 +4,9 @@
     "api/proxy.js": {
       "maxDuration": 10
     },
+    "api/instagram-analytics.js": {
+      "maxDuration": 60
+    },
     "api/tiktok-analytics.js": {
       "maxDuration": 60
     }

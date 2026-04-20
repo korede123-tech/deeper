@@ -19,7 +19,9 @@ function figmaAssetResolver() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apifyToken = env.APIFY_TOKEN || env.VITE_APIFY_TOKEN || ''
+  const apifyInstagramActorId = env.APIFY_INSTAGRAM_ACTOR_ID || 'apify~instagram-scraper'
   const apifyActorId = env.APIFY_TIKTOK_ACTOR_ID || 'clockworks~tiktok-scraper'
+  const instagramProxyPath = `/v2/acts/${apifyInstagramActorId}/run-sync-get-dataset-items`
   const tiktokProxyPath = `/v2/acts/${apifyActorId}/run-sync-get-dataset-items`
 
   return {
@@ -44,6 +46,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: (requestPath) => requestPath.replace(/^\/instagram-proxy/, ''),
+        },
+        '/instagram-apify-proxy': {
+          target: 'https://api.apify.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: () => `${instagramProxyPath}${apifyToken ? `?token=${encodeURIComponent(apifyToken)}` : ''}`,
         },
         '/jina-proxy': {
           target: 'https://r.jina.ai',

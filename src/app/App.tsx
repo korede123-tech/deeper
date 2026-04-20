@@ -421,7 +421,7 @@ const fetchJsonSource = async (url: string): Promise<Record<string, unknown> | n
   }
 };
 
-const fetchPublicInstagramAnalytics = async (
+const fetchLegacyInstagramAnalytics = async (
   parsedUrl: ParsedInstagramUrl,
 ): Promise<FetchedInstagramAnalytics | null> => {
   const fetchForMediaType = async (
@@ -621,6 +621,83 @@ const fetchPublicInstagramAnalytics = async (
   }
 
   return pickMoreCompleteResult(primaryResult, fallbackResult);
+};
+
+const fetchPublicInstagramAnalytics = async (
+  parsedUrl: ParsedInstagramUrl,
+): Promise<FetchedInstagramAnalytics | null> => {
+  const endpoint = import.meta.env.PROD
+    ? '/api/instagram-analytics'
+    : '/instagram-apify-proxy';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 65_000);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        directUrls: [parsedUrl.canonicalUrl],
+        resultsType: 'details',
+        resultsLimit: 1,
+      }),
+    });
+
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !Array.isArray(payload) || payload.length === 0) {
+      return await fetchLegacyInstagramAnalytics(parsedUrl);
+    }
+
+    const firstRecord = payload[0];
+    if (typeof firstRecord !== 'object' || firstRecord === null) {
+      return await fetchLegacyInstagramAnalytics(parsedUrl);
+    }
+
+    const item = firstRecord as Record<string, unknown>;
+
+    const caption = typeof item.caption === 'string' ? item.caption.trim() : '';
+    const ownerUsername = typeof item.ownerUsername === 'string' ? item.ownerUsername.trim() : '';
+    const postLabelSource = caption || (ownerUsername ? `@${ownerUsername}` : `Post ${parsedUrl.shortcode}`);
+    const postLabel = postLabelSource.length > 28
+      ? `${postLabelSource.slice(0, 28)}...`
+      : postLabelSource;
+
+    const views = parseCompactNumber(String(item.videoViewCount ?? ''));
+    const likes = parseCompactNumber(String(item.likesCount ?? ''));
+    const comments = parseCompactNumber(String(item.commentsCount ?? ''));
+    const createdAt = parseDateFromUnknown(item.timestamp);
+
+    return {
+      platform: 'instagram',
+      shortcode: parsedUrl.shortcode,
+      postLabel,
+      createdAt,
+      supportsDateRange: false,
+      metrics: {
+        views,
+        reach: null,
+        likes,
+        comments,
+        shares: null,
+        reposts: null,
+      },
+    };
+  } catch {
+    return await fetchLegacyInstagramAnalytics(parsedUrl);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const fetchPublicTikTokAnalytics = async (

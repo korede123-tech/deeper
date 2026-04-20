@@ -21,3 +21,11 @@ cp .env.example .env.local
 - For Vercel deployment, set these environment variables in your Vercel project:
   - `APIFY_TOKEN`
   - `APIFY_TIKTOK_ACTOR_ID` (optional, defaults to `clockworks~tiktok-scraper`)
+
+## Instagram analytics setup
+
+- Instagram fetch now uses Apify actor `apify~instagram-scraper` for post URLs.
+- You can switch actors by setting `APIFY_INSTAGRAM_ACTOR_ID`.
+- Required env variables:
+  - `APIFY_TOKEN`
+  - `APIFY_INSTAGRAM_ACTOR_ID` (optional, defaults to `apify~instagram-scraper`)
