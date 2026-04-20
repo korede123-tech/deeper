@@ -24,8 +24,24 @@ interface FetchedInstagramAnalytics {
   };
 }
 
+type ProxySource = 'instagram' | 'jina' | 'noembed';
+
 const UNAVAILABLE_TEXT = 'Unavailable';
 const RANGE_UNAVAILABLE_TEXT = 'Unavailable for selected range';
+
+const buildProxyUrl = (source: ProxySource, path: string): string => {
+  if (import.meta.env.PROD) {
+    return `/api/proxy?source=${source}&path=${encodeURIComponent(path)}`;
+  }
+
+  const devPrefix = source === 'instagram'
+    ? '/instagram-proxy'
+    : source === 'jina'
+    ? '/jina-proxy'
+    : '/noembed-proxy';
+
+  return `${devPrefix}${path}`;
+};
 
 const toIsoDate = (date: Date): string => date.toISOString().split('T')[0];
 
@@ -278,12 +294,21 @@ const fetchJsonSource = async (url: string): Promise<Record<string, unknown> | n
 const fetchPublicInstagramAnalytics = async (
   parsedUrl: ParsedInstagramUrl,
 ): Promise<FetchedInstagramAnalytics | null> => {
-  const localEmbedPath = `/instagram-proxy/${parsedUrl.mediaType}/${parsedUrl.shortcode}/embed/captioned/`;
-  const localPostPath = `/instagram-proxy/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`;
+  const localEmbedPath = buildProxyUrl(
+    'instagram',
+    `/${parsedUrl.mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
+  );
+  const localPostPath = buildProxyUrl('instagram', `/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`);
 
-  const jinaProxyBase = `/jina-proxy/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`;
+  const jinaProxyBase = buildProxyUrl(
+    'jina',
+    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`,
+  );
   const jinaDirectBase = `https://r.jina.ai/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`;
-  const noEmbedUrl = `/noembed-proxy/embed?url=${encodeURIComponent(parsedUrl.canonicalUrl)}`;
+  const noEmbedUrl = buildProxyUrl(
+    'noembed',
+    `/embed?url=${encodeURIComponent(parsedUrl.canonicalUrl)}`,
+  );
 
   const [
     localEmbed,
