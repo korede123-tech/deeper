@@ -19,12 +19,21 @@ const getSingleQueryParam = (value) => {
   return typeof value === 'string' ? value : null;
 };
 
-const isSafePath = (pathValue) => {
+const isSafePath = (source, pathValue) => {
   if (!pathValue || !pathValue.startsWith('/')) {
     return false;
   }
 
-  if (pathValue.startsWith('//') || pathValue.includes('://')) {
+  if (pathValue.startsWith('//')) {
+    return false;
+  }
+
+  if (source === 'jina') {
+    // Jina expects encoded upstream URLs in the path, but we only allow Instagram domains.
+    return /^\/https?:\/\/(www\.)?(instagram\.com|m\.instagram\.com)\//i.test(pathValue);
+  }
+
+  if (pathValue.includes('://')) {
     return false;
   }
 
@@ -45,7 +54,7 @@ export default async function handler(request, response) {
     return;
   }
 
-  if (!isSafePath(pathValue)) {
+  if (!isSafePath(source, pathValue)) {
     response.status(400).json({ error: 'Invalid path' });
     return;
   }

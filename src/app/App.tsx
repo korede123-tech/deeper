@@ -300,10 +300,19 @@ const fetchPublicInstagramAnalytics = async (
   );
   const localPostPath = buildProxyUrl('instagram', `/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`);
 
-  const jinaProxyBase = buildProxyUrl(
+  const jinaProxyPostPath = buildProxyUrl(
     'jina',
     `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`,
   );
+  const jinaProxyJsonHintPath = buildProxyUrl(
+    'jina',
+    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/?__a=1&__d=dis`,
+  );
+  const jinaProxyEmbedPath = buildProxyUrl(
+    'jina',
+    `/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/embed/captioned/`,
+  );
+
   const jinaDirectBase = `https://r.jina.ai/http://www.instagram.com/${parsedUrl.mediaType}/${parsedUrl.shortcode}/`;
   const noEmbedUrl = buildProxyUrl(
     'noembed',
@@ -323,9 +332,9 @@ const fetchPublicInstagramAnalytics = async (
   ] = await Promise.all([
     fetchTextSource(localEmbedPath),
     fetchTextSource(localPostPath),
-    fetchTextSource(jinaProxyBase),
-    fetchTextSource(`${jinaProxyBase}?__a=1&__d=dis`),
-    fetchTextSource(`${jinaProxyBase}embed/captioned/`),
+    fetchTextSource(jinaProxyPostPath),
+    fetchTextSource(jinaProxyJsonHintPath),
+    fetchTextSource(jinaProxyEmbedPath),
     fetchTextSource(jinaDirectBase),
     fetchTextSource(`${jinaDirectBase}?__a=1&__d=dis`),
     fetchTextSource(`${jinaDirectBase}embed/captioned/`),
