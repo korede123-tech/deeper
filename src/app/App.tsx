@@ -533,10 +533,17 @@ export default function App() {
     setDateRangeDataAvailable(true);
 
     const fetched = await fetchPublicInstagramAnalytics(parsedUrl);
-    const hasAnyMetric = Boolean(
-      fetched &&
-      Object.values(fetched.metrics).some((metricValue) => metricValue !== null),
-    );
+    const availablePublicMetricLabels = fetched
+      ? [
+          fetched.metrics.views !== null ? 'views' : null,
+          fetched.metrics.reach !== null ? 'reach' : null,
+          fetched.metrics.likes !== null ? 'likes' : null,
+          fetched.metrics.comments !== null ? 'comments' : null,
+          fetched.metrics.shares !== null ? 'shares' : null,
+        ].filter((value): value is string => value !== null)
+      : [];
+
+    const hasAnyMetric = availablePublicMetricLabels.length > 0;
 
     if (!fetched || !hasAnyMetric) {
       setStatus('unavailable');
@@ -548,7 +555,11 @@ export default function App() {
     }
 
     setStatus('success');
-    setStatusMessage('Public metrics loaded.');
+    setStatusMessage(
+      availablePublicMetricLabels.length < 5
+        ? `Public metrics loaded (partial): ${availablePublicMetricLabels.join(', ')}.`
+        : 'Public metrics loaded.',
+    );
     setAnalytics(fetched);
     setPostCreationDate(fetched.createdAt);
 
@@ -706,7 +717,7 @@ export default function App() {
               <div className="mb-4 text-xs opacity-60 tracking-wide">
                 {postCreationDate
                   ? `Post created: ${formatDate(postCreationDate)} (minimum selectable date)`
-                  : 'Post creation date unavailable. Date range analytics unavailable for selected range.'}
+                  : 'Post creation date unavailable. Showing lifetime metrics only.'}
               </div>
 
               <div className="grid grid-cols-2 gap-6 mb-6">
